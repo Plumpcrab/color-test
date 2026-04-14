@@ -24,12 +24,13 @@ const REF = doc(db, 'classdata', 'main');
 
 // ===== STATE =====
 let D = {
-  accounts:   [],
-  layout:     null,
-  pairs:      [],
-  conditions: [],
-  settings:   {adminPw:'admin204'},
-  published:  false,
+  accounts:     [],
+  layout:       null,
+  pairs:        [],
+  conditions:   [],
+  settings:     {adminPw:'admin204'},
+  published:    false,
+  matchMode:    'complementary',
 };
 
 async function loadData(){
@@ -43,6 +44,10 @@ async function loadData(){
       D.conditions = d.conditions || [];
       D.settings   = d.settings   || {adminPw:'admin204'};
       D.published  = d.published  || false;
+      D.matchMode  = d.matchMode  || 'complementary';
+      selectedMode = D.matchMode;
+      D.matchMode  = d.matchMode  || 'complementary';
+      selectedMode = D.matchMode;
     }
   } catch(e){ console.error('load error', e); }
   document.getElementById('loading').style.display='none';
@@ -59,6 +64,7 @@ async function save(){
       conditions: D.conditions,
       settings:   D.settings,
       published:  D.published,
+      matchMode:  D.matchMode,
     });
   } catch(e){ console.error('save error', e); showToast('저장 실패 😢 네트워크를 확인해주세요','#dc2626'); }
 }
@@ -73,11 +79,15 @@ onSnapshot(REF, (snap) => {
   D.conditions = d.conditions || [];
   D.settings   = d.settings   || {adminPw:'admin204'};
   D.published  = d.published  || false;
-  // 현재 학생 로그인 상태면 마이페이지 갱신
+  // curUser 실시간 갱신
   if(curUser){
-    curUser = D.accounts.find(a=>a.id===curUser.id)||curUser;
+    const fresh = D.accounts.find(a=>a.id===curUser.id);
+    if(fresh) curUser = fresh;
     const cur = document.querySelector('.screen.active');
-    if(cur && cur.id==='screen-mypage') renderMypage();
+    if(cur){
+      if(cur.id==='screen-mypage') renderMypage();
+      if(cur.id==='screen-stuhome') goStuHome();
+    }
   }
 });
 
@@ -214,7 +224,13 @@ async function finishQuiz(){
   else tid='orange';
   const tempResult=Object.entries(tc).sort((a,b)=>b[1]-a[1])[0][0];
   const idx=D.accounts.findIndex(a=>a.id===curUser.id);
-  if(idx>=0){D.accounts[idx]={...D.accounts[idx],typeId:tid,scores:sc,temp:tempResult,done:true};curUser=D.accounts[idx];await save();}
+  if(idx>=0){
+    D.accounts[idx]={...D.accounts[idx],typeId:tid,scores:sc,temp:tempResult,done:true};
+    curUser=D.accounts[idx];
+    showToast('저장 중...','#7c3aed');
+    await save();
+    showToast('결과 저장 완료! ✅');
+  }
   renderMypage();go('mypage');
 }
 
@@ -470,7 +486,12 @@ function renderMatchModes(){
       </div>
     </label>`).join('');
 }
-window.selectMode=function(id){selectedMode=id;renderMatchModes();};
+window.selectMode=async function(id){
+  selectedMode=id;
+  D.matchMode=id;
+  await save();
+  renderMatchModes();
+};
 const THEMES=[
   {name:'🎨 보색 조화형',desc:'서로 반대되는 성향이 만나 멋진 조화를 이루는 배치입니다. 차이가 시너지가 되는 자리예요!'},
   {name:'🌡️ 색온도 균형형',desc:'따뜻한 에너지와 차가운 집중력이 교실 앞뒤로 균형을 이루는 배치입니다.'},
