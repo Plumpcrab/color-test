@@ -470,7 +470,7 @@ const MATCH_MODES = [
     name: '🎲 완전 랜덤형',
     desc: '성향 무관 완전 랜덤 배치',
     detail: '특수조건만 지키고 나머지는 랜덤으로 배치',
-    score: ()=> Math.random()*100
+    score: ()=> Math.floor(Math.random()*100)
   },
 ];
 let selectedMode = 'complementary';
@@ -521,16 +521,17 @@ let currentTheme=null;
 let absentIds=new Set();
 
 function pairC(a,b){
-  const mode=MATCH_MODES.find(m=>m.id===selectedMode)||MATCH_MODES[0];
-  let s=mode.score(a,b);
-  // 주변 배치 조건 보너스는 모든 모드에 적용
-  for(const c of D.conditions){
-    if(c.type==='near_candidates'&&c.candidates){
-      if(c.name1===a.name&&c.candidates.includes(b.name))s+=40;
-      if(c.name1===b.name&&c.candidates.includes(a.name))s+=40;
+  try {
+    const mode=MATCH_MODES.find(m=>m.id===selectedMode)||MATCH_MODES[0];
+    let s=mode.score(a,b);
+    for(const c of D.conditions){
+      if(c.type==='near_candidates'&&c.candidates){
+        if(c.name1===a.name&&c.candidates.includes(b.name))s+=40;
+        if(c.name1===b.name&&c.candidates.includes(a.name))s+=40;
+      }
     }
-  }
-  return Math.min(100,Math.max(5,s));
+    return Math.min(100,Math.max(5,Math.floor(s)));
+  } catch(e){ return Math.floor(Math.random()*50)+25; }
 }
 function checkCond(a,b){for(const c of D.conditions){if(c.type==='no_opposite_gender'&&(c.name1===a.name||c.name1===b.name)&&a.gender!==b.gender)return false;if(c.type==='no_pair'&&[a.name,b.name].includes(c.name1)&&[a.name,b.name].includes(c.name2))return false;}return true;}
 
