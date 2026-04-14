@@ -143,9 +143,42 @@ window.stuLogin=async function(){
   if(!acc){document.getElementById('sErr').style.display='block';return;}
   document.getElementById('sErr').style.display='none';
   curUser=acc;
-  if(!acc.done){buildQs();quizAns=new Array(30).fill(null);quizIdx=0;document.getElementById('qName').textContent=acc.name+'님';renderQ();go('quiz');return;}
-  renderMypage();go('mypage');
+  goStuHome();
 };
+
+function goStuHome(){
+  const u=curUser;
+  document.getElementById('stuHomeName').textContent=`안녕하세요, ${u.name}님! 👋`;
+  // 테스트 완료 여부에 따라 버튼 상태
+  const btnTest=document.getElementById('btnStartTest');
+  const btnResult=document.getElementById('btnViewResult');
+  const notice=document.getElementById('stuHomeNotice');
+  if(u.done){
+    btnTest.textContent='🔄 심리테스트 다시하기';
+    btnTest.className='btn bs';
+    btnResult.style.display='block';
+    notice.style.display='block';
+    notice.textContent='✅ 심리테스트를 완료했어요! 결과를 확인해보세요.';
+  } else {
+    btnTest.textContent='🎨 심리테스트 시작하기';
+    btnTest.className='btn bp';
+    btnResult.style.display='none';
+    notice.style.display='block';
+    notice.textContent='📝 아직 심리테스트를 하지 않았어요. 테스트를 시작해주세요!';
+  }
+  go('stuhome');
+}
+
+window.goStartTest=function(){
+  buildQs();quizAns=new Array(30).fill(null);quizIdx=0;
+  document.getElementById('qName').textContent=curUser.name+'님';
+  renderQ();go('quiz');
+};
+
+window.quitTest=function(){
+  go('stuhome');
+};
+
 window.stuLogout=function(){curUser=null;document.getElementById('sId').value='';document.getElementById('sPw').value='';go('home');};
 
 // ===== QUIZ =====
@@ -448,10 +481,17 @@ const THEMES=[
 // ===== MATCHING =====
 
 function renderAbsentList(){
-  const done=D.accounts.filter(a=>a.done);
+  // 전체 등록 학생 (검사 여부 무관)
+  const all=D.accounts;
   const el=document.getElementById('absentList');
-  if(!done.length){el.innerHTML='<span style="font-size:.78rem;color:#a16207">테스트 완료 학생이 없어요.</span>';return;}
-  el.innerHTML=done.sort((a,b)=>a.num-b.num).map(a=>{const checked=absentIds.has(a.id);return `<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:20px;cursor:pointer;font-size:.8rem;font-weight:600;border:1.5px solid ${checked?'#dc2626':'#d1d5db'};background:${checked?'#fee2e2':'#fff'};color:${checked?'#dc2626':'#374151'};transition:all .15s"><input type="checkbox" style="width:auto;padding:0;border:none;accent-color:#dc2626" ${checked?'checked':''} onchange="toggleAbsent('${a.id}',this.checked)"> ${a.name}</label>`;}).join('');
+  if(!all.length){el.innerHTML='<span style="font-size:.78rem;color:#a16207">등록된 학생이 없어요.</span>';return;}
+  el.innerHTML=all.sort((a,b)=>a.num-b.num).map(a=>{
+    const checked=absentIds.has(a.id);
+    const doneTag=a.done?'':'<span style="font-size:.65rem;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:8px;margin-left:3px">미검사</span>';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:20px;cursor:pointer;font-size:.8rem;font-weight:600;border:1.5px solid ${checked?'#dc2626':'#d1d5db'};background:${checked?'#fee2e2':'#fff'};color:${checked?'#dc2626':'#374151'};transition:all .15s">
+      <input type="checkbox" style="width:auto;padding:0;border:none;accent-color:#dc2626" ${checked?'checked':''} onchange="toggleAbsent('${a.id}',this.checked)"> ${a.name}${doneTag}
+    </label>`;
+  }).join('');
 }
 window.toggleAbsent=function(id,checked){checked?absentIds.add(id):absentIds.delete(id);renderAbsentList();};
 window.clearAbsent=function(){absentIds.clear();renderAbsentList();};
@@ -474,13 +514,12 @@ function pairC(a,b){
 function checkCond(a,b){for(const c of D.conditions){if(c.type==='no_opposite_gender'&&(c.name1===a.name||c.name1===b.name)&&a.gender!==b.gender)return false;if(c.type==='no_pair'&&[a.name,b.name].includes(c.name1)&&[a.name,b.name].includes(c.name2))return false;}return true;}
 
 window.doMatch=async function(){
-  const done=D.accounts.filter(a=>a.done&&!absentIds.has(a.id));
-  if(done.length<2){showToast('참석 학생이 2명 이상 필요해요!','#dc2626');return;}
-  let pool=[...done];const pairs=[];const used=new Set();
-  for(const c of D.conditions){if(c.type==='force_pair'){const a=pool.find(s=>s.name===c.name1&&!used.has(s.id)),b=pool.find(s=>s.name===c.name2&&!used.has(s.id));if(a&&b){pairs.push({a,b,score:100,forced:true});used.add(a.id);used.add(b.id);}}}
-  const frontNames=new Set(D.conditions.filter(c=>c.type==='front_row').map(c=>c.name1));
-  const backNames=new Set(D.conditions.filter(c=>c.type==='back_row').map(c=>c.name1));
-  let rem=pool.filter(s=>!used.has(s.id));
+  // 전체 학생 중 결석 제외 (미검사 포함)
+  const all=D.accounts.filter(a=>!absentIds.has(a.id));
+  if(all.length<2){showToast('참석 학생이 2명 이상 필요해요!','#dc2626');return;}
+  // 미검사 학생은 typeId/scores 없으므로 기본값 부여
+  const pool=all.map(a=>({...a, typeId:a.typeId||'orange', scores:a.scores||{E:0,A:0,O:0,C:0,N:0}, temp:a.temp||'neutral'}));  const pairs=[];const used=new Set();
+  let rem=[...pool];
   while(rem.length>=2){
     const a=rem[0];let bi=1,bs=-1;
     for(let i=1;i<rem.length;i++){if(!checkCond(a,rem[i]))continue;const sc=pairC(a,rem[i]);if(sc>bs){bs=sc;bi=i;}}
@@ -494,7 +533,13 @@ window.doMatch=async function(){
   currentTheme=THEMES[Math.floor(Math.random()*THEMES.length)];
   D.pairs=pairs;await save();
   const absentNames=D.accounts.filter(a=>absentIds.has(a.id)).map(a=>a.name);
-  if(absentNames.length)document.getElementById('condWarnings').innerHTML=`<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:7px;padding:7px 11px;font-size:.78rem;color:#dc2626;margin-bottom:7px">🙋 결석 제외: <b>${absentNames.join(', ')}</b></div>`;
+  const untestedNames=all.filter(a=>!a.done).map(a=>a.name);
+  if(absentNames.length||untestedNames.length){
+    let msg='';
+    if(absentNames.length) msg+=`🙋 결석 제외: <b>${absentNames.join(', ')}</b><br>`;
+    if(untestedNames.length) msg+=`⚠️ 미검사(랜덤 배치): <b>${untestedNames.join(', ')}</b>`;
+    document.getElementById('condWarnings').innerHTML=`<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:7px;padding:7px 11px;font-size:.78rem;color:#dc2626;margin-bottom:7px">${msg}</div>`;
+  }
   renderSeating();showToast('매칭 완료! ✅');
 };
 
@@ -693,6 +738,21 @@ tr:hover td{background:#f9f9ff}
   </div>
 </div>
 
+<!-- STUDENT HOME -->
+<div id="screen-stuhome" class="screen" style="justify-content:center">
+  <div class="card" style="max-width:380px">
+    <div class="tc" style="font-size:2.5rem;margin-bottom:6px">👋</div>
+    <h2 class="tc" id="stuHomeName">안녕하세요!</h2>
+    <p class="tc" style="margin-bottom:20px">무엇을 할까요?</p>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn bp" style="width:100%" id="btnStartTest" onclick="goStartTest()">🎨 심리테스트 시작하기</button>
+      <button class="btn bs" style="width:100%" id="btnViewResult" onclick="renderMypage();go('mypage')">📊 내 결과 보기</button>
+      <button class="btn bd" style="width:100%;margin-top:4px" onclick="stuLogout()">← 로그아웃</button>
+    </div>
+    <div id="stuHomeNotice" class="notice mt12" style="display:none"></div>
+  </div>
+</div>
+
 <!-- QUIZ -->
 <div id="screen-quiz" class="screen">
   <div class="card" style="max-width:540px;width:100%">
@@ -705,6 +765,7 @@ tr:hover td{background:#f9f9ff}
     <div class="color-opts" id="qOpts"></div>
     <div class="flex mt16" style="justify-content:space-between">
       <button class="btn bs bsm" id="qPrev" onclick="qPrev()">← 이전</button>
+      <button class="btn bd bsm" onclick="quitTest()">검사 그만두기</button>
       <button class="btn bp bsm" id="qNext" onclick="qNext()" disabled>다음 →</button>
     </div>
   </div>
@@ -715,7 +776,10 @@ tr:hover td{background:#f9f9ff}
   <div class="card" style="max-width:600px;width:100%">
     <div class="flex" style="justify-content:space-between;margin-bottom:14px">
       <h2 style="margin:0">🎨 나의 색깔 성향</h2>
-      <button class="btn bs bsm" onclick="stuLogout()">로그아웃</button>
+      <div class="flex" style="gap:6px">
+        <button class="btn bs bsm" onclick="go('stuhome')">← 홈</button>
+        <button class="btn bd bsm" onclick="stuLogout()">로그아웃</button>
+      </div>
     </div>
     <div id="mp-result"></div>
     <div class="dv"></div>
