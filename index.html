@@ -228,7 +228,7 @@ window.swTab=function(name,el){
   if(name==='settings'){document.getElementById('settings-lock').style.display='block';document.getElementById('settings-content').style.display='none';document.getElementById('settingsPw').value='';document.getElementById('settingsPwErr').style.display='none';}
   if(name==='accounts')renderAccTable();
   if(name==='layout')renderLayout();
-  if(name==='matching'){renderAbsentList();renderSeating();}
+  if(name==='matching'){renderMatchModes();renderAbsentList();renderSeating();}
   if(name==='publish')renderPublishStatus();
 };
 
@@ -361,7 +361,83 @@ function renderLayout(){
 }
 window.saveLayout=async function(){D.layout=JSON.parse(JSON.stringify(grid));await save();showToast('좌석 배치 저장됨 ✅');};
 
-// ===== MATCHING =====
+// ===== MATCH MODES =====
+const MATCH_MODES = [
+  {
+    id: 'complementary',
+    name: '🎨 보색 조화형',
+    desc: '반대 성향끼리 매칭 — 서로 부족한 점을 채워줘요',
+    detail: '열정형↔차분형, 밝음형↔감성형 등 보완 관계 우선',
+    score: (a,b)=>{
+      const ta=gT(a.typeId),tb=gT(b.typeId);let s=50;
+      if(ta.compat.includes(b.typeId))s+=40;
+      if(tb.compat.includes(a.typeId))s+=30;
+      if(a.typeId===b.typeId)s-=20;
+      if(ta.temp!==tb.temp&&ta.temp!=='neutral'&&tb.temp!=='neutral')s+=15;
+      return s;
+    }
+  },
+  {
+    id: 'similar',
+    name: '🤝 유사 성향형',
+    desc: '비슷한 성향끼리 매칭 — 편안하고 안정적인 관계',
+    detail: '성향 점수가 가까운 학생끼리 우선 매칭',
+    score: (a,b)=>{
+      if(!a.scores||!b.scores)return 50;
+      const keys=['E','A','O','C','N'];
+      const diff=keys.reduce((s,k)=>s+Math.abs((a.scores[k]||0)-(b.scores[k]||0)),0);
+      return Math.max(10, 100-diff*3);
+    }
+  },
+  {
+    id: 'temp_balance',
+    name: '🌡️ 색온도 균형형',
+    desc: '따뜻한 색+차가운 색 짝꿍 — 에너지 균형',
+    detail: '따뜻한 색 계열과 차가운 색 계열을 반드시 짝꿍으로',
+    score: (a,b)=>{
+      let s=50;
+      if(a.temp!==b.temp&&a.temp!=='neutral'&&b.temp!=='neutral')s+=50;
+      if(a.temp===b.temp)s-=20;
+      const ta=gT(a.typeId),tb=gT(b.typeId);
+      if(ta.compat.includes(b.typeId))s+=10;
+      return s;
+    }
+  },
+  {
+    id: 'gender_mix',
+    name: '👫 남녀 균형형',
+    desc: '남녀 짝꿍으로 매칭 — 다양한 시각 교류',
+    detail: '가능하면 남녀가 짝꿍이 되도록 우선 매칭 (특수조건 제외)',
+    score: (a,b)=>{
+      let s=50;
+      if(a.gender!==b.gender)s+=40;
+      const ta=gT(a.typeId),tb=gT(b.typeId);
+      if(ta.compat.includes(b.typeId))s+=15;
+      return s;
+    }
+  },
+  {
+    id: 'random',
+    name: '🎲 완전 랜덤형',
+    desc: '성향 무관 완전 랜덤 배치',
+    detail: '특수조건만 지키고 나머지는 랜덤으로 배치',
+    score: ()=> Math.random()*100
+  },
+];
+let selectedMode = 'complementary';
+
+function renderMatchModes(){
+  document.getElementById('matchModeList').innerHTML = MATCH_MODES.map(m=>`
+    <label style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;cursor:pointer;border:2px solid ${selectedMode===m.id?'var(--pr)':'var(--bd)'};background:${selectedMode===m.id?'#faf5ff':'#fff'};transition:all .18s">
+      <input type="radio" name="matchMode" value="${m.id}" ${selectedMode===m.id?'checked':''} style="width:auto;padding:0;border:none;accent-color:var(--pr);margin-top:2px;flex-shrink:0" onchange="selectMode('${m.id}')">
+      <div>
+        <div style="font-weight:700;font-size:.88rem;color:${selectedMode===m.id?'var(--pr)':'var(--tx)'}">${m.name}</div>
+        <div style="font-size:.78rem;color:var(--sub);margin-top:2px">${m.desc}</div>
+        <div style="font-size:.72rem;color:#a78bfa;margin-top:1px">${m.detail}</div>
+      </div>
+    </label>`).join('');
+}
+window.selectMode=function(id){selectedMode=id;renderMatchModes();};
 const THEMES=[
   {name:'🎨 보색 조화형',desc:'서로 반대되는 성향이 만나 멋진 조화를 이루는 배치입니다. 차이가 시너지가 되는 자리예요!'},
   {name:'🌡️ 색온도 균형형',desc:'따뜻한 에너지와 차가운 집중력이 교실 앞뒤로 균형을 이루는 배치입니다.'},
@@ -369,8 +445,7 @@ const THEMES=[
   {name:'🌈 색상환 순환형',desc:'다양한 성향이 고르게 섞여 교실 전체가 무지개처럼 풍성해지는 배치입니다.'},
   {name:'💫 심리 균형형',desc:'내향과 외향, 감성과 이성이 절묘하게 어우러진 심리학적 균형 배치입니다.'},
 ];
-let currentTheme=null;
-let absentIds=new Set();
+// ===== MATCHING =====
 
 function renderAbsentList(){
   const done=D.accounts.filter(a=>a.done);
@@ -381,13 +456,20 @@ function renderAbsentList(){
 window.toggleAbsent=function(id,checked){checked?absentIds.add(id):absentIds.delete(id);renderAbsentList();};
 window.clearAbsent=function(){absentIds.clear();renderAbsentList();};
 
+let currentTheme=null;
+let absentIds=new Set();
+
 function pairC(a,b){
-  const ta=gT(a.typeId),tb=gT(b.typeId);let s=50;
-  if(ta.compat.includes(b.typeId))s+=35;if(tb.compat.includes(a.typeId))s+=25;
-  if(a.typeId===b.typeId)s-=15;
-  if(ta.temp!==tb.temp&&ta.temp!=='neutral'&&tb.temp!=='neutral')s+=15;
-  for(const c of D.conditions){if(c.type==='near_candidates'&&c.candidates){if(c.name1===a.name&&c.candidates.includes(b.name))s+=40;if(c.name1===b.name&&c.candidates.includes(a.name))s+=40;}}
-  return Math.min(100,Math.max(20,s));
+  const mode=MATCH_MODES.find(m=>m.id===selectedMode)||MATCH_MODES[0];
+  let s=mode.score(a,b);
+  // 주변 배치 조건 보너스는 모든 모드에 적용
+  for(const c of D.conditions){
+    if(c.type==='near_candidates'&&c.candidates){
+      if(c.name1===a.name&&c.candidates.includes(b.name))s+=40;
+      if(c.name1===b.name&&c.candidates.includes(a.name))s+=40;
+    }
+  }
+  return Math.min(100,Math.max(5,s));
 }
 function checkCond(a,b){for(const c of D.conditions){if(c.type==='no_opposite_gender'&&(c.name1===a.name||c.name1===b.name)&&a.gender!==b.gender)return false;if(c.type==='no_pair'&&[a.name,b.name].includes(c.name1)&&[a.name,b.name].includes(c.name2))return false;}return true;}
 
@@ -718,7 +800,11 @@ tr:hover td{background:#f9f9ff}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         <span class="zone-warm">🌶️ 따뜻한 색 → 앞줄</span>
         <span class="zone-cool">🧊 차가운 색 → 뒷줄</span>
-        <span class="zone-n">💞 짝꿍 = 보색</span>
+      </div>
+      <!-- 매칭 방식 선택 -->
+      <div style="background:var(--pl);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-size:.85rem;font-weight:700;color:var(--pr);margin-bottom:10px">💞 짝꿍 매칭 방식 선택</div>
+        <div id="matchModeList" style="display:flex;flex-direction:column;gap:7px"></div>
       </div>
       <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:9px;padding:10px 14px;margin-bottom:10px">
         <div class="flex" style="justify-content:space-between;margin-bottom:7px">
